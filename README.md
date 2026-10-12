@@ -26,8 +26,6 @@ A collateralised borrow in an isolated market is a **two-tranche structure**: th
 
 "Near-zero LGD" on blue-chip collateral is **real but conditional**: it holds only while liquidators can offload seized collateral within σ\* of the oracle price. When the haircut needed to warehouse an asset exceeds σ\*, **no rational liquidator clears it** — the position can't be liquidated and the lender is left short a put that is never exercised. For tokenised / illiquid collateral near the cap, that put is **permanently uncleared**.
 
-This formalises, from protocol mechanics, the fragility that practitioners have described empirically — see the Keyring Network liquidation-research call for contributors ([keyring-cayman-liquidation-research-paper#5](https://github.com/Keyring-Network/keyring-cayman-liquidation-research-paper/issues/5)). The empirical call and this formal model are two halves of one problem.
-
 ## Building
 
 `the-liquidators-frontier.tex` is self-contained (no external figures). Build with any TeX distribution:
