@@ -1,0 +1,908 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=3.1cm,top=3.0cm,bottom=3.2cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\linespread{1.08}
+\setlength{\parindent}{1.4em}
+\setlength{\parskip}{0pt}
+
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}[proposition]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[proposition]{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}[proposition]{Remark}
+
+\pagestyle{fancy}\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\small\itshape The Liquidator's Frontier}
+\fancyhead[R]{\small\thepage}
+
+\newcommand{\LIF}{\mathrm{LIF}}
+\DeclareMathOperator{\ltv}{LTV}
+
+\begin{document}
+
+\begin{titlepage}
+\vspace*{7.5cm}
+\begin{center}
+{\LARGE\bfseries The Liquidator's Frontier}\\[0.9em]
+{\large Leverage, Seniority and the Endogenous Attachment Point\\ in Isolated Lending Markets}\\[2.6em]
+{\normalsize $\sigma$-Labs}\\[0.9em]
+{\normalsize 10 September 2026}
+\end{center}
+\end{titlepage}
+
+\newpage
+\section*{Abstract}
+\thispagestyle{fancy}
+
+A collateralised borrow in an isolated lending market is not a loan with a haircut. It is a
+two-tranche structure: the borrower holds the residual claim and is long a put on the collateral,
+the lender holds a senior one. What is not standard is that the attachment point is of two kinds.
+The \emph{contractual} attachment --- the price at which senior loss becomes arithmetically
+unavoidable --- is fixed at creation and has a closed form. The \emph{effective} attachment ---
+the price at which the mechanism stops working --- is produced block by block by an oracle, a
+liquidation incentive and an interest-rate model, is never written down, and is the one that binds.
+
+This paper derives the first in closed form for markets of the Morpho Blue type, then spends its
+length on the second. Two corrections to the received account follow. The borrower's put is struck
+at the senior threshold, not at the liquidation threshold, so a liquidated borrower is not a
+wiped-out one; and the naive account, which ignores the premium paid to the agent who enforces the
+structure, overstates both the equity cushion and the buffer by exactly that premium --- $2.9$
+points of the entry price at production parameters, against a $7.9$-point interval between the two
+thresholds.
+
+The central result concerns not when liquidation is permitted but when it is performed. Modelling
+a flash-financed liquidator, who receives collateral at the oracle price and must sell it at the
+market price, gives one incentive inequality. It yields a maximum tolerable slippage $\sigma^{*}$
+and a minimum viable position size proportional to gas. That budget is not free: $\sigma^{*}$ and
+the room the liquidator has to work in are the same primitive $1-\lambda$, split in the fixed
+proportion $c$ to $1-c$, so what pays the enforcing agent is taken out of the distance over which
+it must succeed.
+
+The inequality is then made dynamic. Slippage need not be estimated --- the venue state is readable
+at every block --- so the frontier is a floor computable each block, free of any distributional
+assumption, at the cost of being a best case. A position larger than one admissible slice must be
+cleared in sequence, and we bound how many slices a market can carry by a number independent of the
+borrower's leverage. Impact, volatility and carry then enter one first-passage problem whose
+degenerate limits are the deterministic and driftless cases, and two markets with identical caps
+and identical room are shown to differ by orders of magnitude in the probability of senior loss.
+Finally we bound where a liquidation cascade stops --- with finite borrow it always stops --- by a
+secant condition valid at the cliffs of a step function, where a contraction argument is not.
+
+Three apparently distinct failure modes --- a reverting oracle, illiquid collateral, and dust
+positions nobody bothers to close --- are the same inequality losing on different terms. We close
+with the consequence for parameter choice: raising the loan-to-value cap does not only thin the
+residual tranche, it shrinks the enforcing agent's slippage budget, so the cap is a claim about the
+collateral's liquidity stated in the grammar of a risk parameter.
+
+\medskip
+\noindent\textbf{Keywords.} Collateralised lending; tranching; attachment point; liquidation
+incentives; flash loans; market microstructure; decentralised finance; lending protocols.
+
+\newpage
+\section{The setting}
+
+Fix an isolated lending market in the sense of Morpho Blue: one collateral asset, one loan
+asset, one oracle, one interest-rate model, and one liquidation loan-to-value cap
+$\lambda \in (0,1)$, all immutable at creation.
+
+A borrower holds collateral worth $A$ in units of the loan asset, valued at the oracle price,
+and owes $D$. Write
+\[
+  \ltv \;=\; \frac{D}{A}, \qquad E \;=\; A-D, \qquad L \;=\; \frac{A}{E} \;=\; \frac{1}{1-\ltv},
+\]
+so that $D = (L-1)E$ and $\ltv_0 = (L-1)/L$ at entry. The position is \emph{healthy} while
+\begin{equation}\label{eq:healthy}
+  A\lambda \;\geq\; D,
+\end{equation}
+which is the on-chain solvency predicate, evaluated with the oracle price and nothing else.
+
+Throughout, $\ell$ denotes a proportional fall in the price of the collateral, so the collateral
+is worth $A(1-\ell)$ after the move, and $D$ is unchanged over the horizon considered unless
+interest is explicitly in play.
+
+\subsection{Why this is a tranche}
+
+Three positions on the same asset must be distinguished, because they are routinely conflated.
+
+Holding the collateral outright gives a linear payoff with unbounded downside. Posting it and
+borrowing gives something else: the borrower keeps the drawn $D$, and if the collateral falls
+far enough it is seized and the debt is extinguished against it. The borrower's loss is
+therefore truncated, and the lender's recovery is $\min(D,\,A/\LIF)$ for the incentive factor
+$\LIF$ defined below --- which is $D$ less $1/\LIF$ puts on the collateral struck at $D\,\LIF$.
+The lender is short those puts and the borrower is long them, which is what seniority means in
+credit.
+
+Two remarks on the strike, both of which the informal account gets wrong. It is $D\,\LIF$, the
+level at which exhaustive seizure stops covering the debt --- not the liquidation threshold
+$D/\lambda$, which is a barrier at which the mechanism switches on, not a level at which anyone
+is paid. And the two are distinct: at the liquidation threshold, exhaustive seizure returns
+$A - D\,\LIF > 0$ to the borrower. Being liquidated is not being wiped out.
+
+Re-levering does not create the residual tranche; the first borrow already did. It thins it.
+
+\section{Tranche geometry}
+
+\begin{proposition}[Liquidation threshold]\label{prop:liq}
+A position entered at $\ltv_0 \leq \lambda$ becomes liquidatable after a proportional price fall
+\[
+  \ell_{\mathrm{liq}} \;=\; 1-\frac{\ltv_0}{\lambda} \;=\; 1-\frac{L-1}{L\lambda}.
+\]
+\end{proposition}
+
+\begin{proof}
+By \eqref{eq:healthy} the position ceases to be healthy when $A(1-\ell)\lambda < D$, that is
+$1-\ell < D/(A\lambda) = \ltv_0/\lambda$. Substituting $\ltv_0=(L-1)/L$ gives the second form.
+\end{proof}
+
+Enforcement is not free. A liquidator who repays $r$ receives collateral worth $r\,\LIF$, where
+the incentive factor is fixed by two protocol constants.
+
+\begin{definition}[Liquidation incentive factor]
+With cursor $c$ and cap $M$,
+\[
+  \LIF(\lambda) \;=\; \min\!\left(M,\ \frac{1}{1-c\,(1-\lambda)}\right),
+  \qquad c=0.3,\quad M=1.15 .
+\]
+\end{definition}
+
+$\LIF$ is decreasing in $\lambda$: a tighter cap pays the enforcer more. The reason is a
+constraint, not a judgement about risk --- the bonus has to fit inside the collateral surplus
+$1/\lambda-1$ that still exists when liquidation opens, and that surplus shrinks as the cap rises.
+Throughout we assume $M$ is not binding, which holds for $\lambda > 0.5652$ and therefore for every
+parameter considered here.
+
+\begin{proposition}[Senior threshold and loss]\label{prop:sen}
+Exhaustive seizure of collateral worth $A$ repays at most $A/\LIF$. Consequently senior loss is
+unavoidable if and only if $A < D\,\LIF$, that is after a fall
+\[
+  \ell_{\mathrm{sen}} \;=\; 1-\ltv_0\,\LIF ,
+\]
+and its magnitude is $D - A/\LIF$, not $D-A$.
+\end{proposition}
+
+\begin{proof}
+A liquidator repaying $r$ removes $r\,\LIF$ of collateral value, so the largest repayment the
+collateral can fund is $r_{\max}=A/\LIF$. If $A/\LIF \geq D$ the debt is fully repayable and
+$A - D\,\LIF$ of collateral survives. Otherwise the residual debt $D-A/\LIF$ is unrecoverable.
+Writing $A = A_0(1-\ell)$ and dividing by $A_0$ gives the threshold.
+\end{proof}
+
+The threshold $\ell_{\mathrm{sen}}$ is the \emph{contractual attachment point} of the structure: the
+fall at which the senior claim begins to be impaired, determined by $\lambda$, fixed at creation,
+and by $\ltv_0$, fixed when the position is opened and thereafter drifting only with carry. It is
+available in closed form to anyone who reads the parameters. It is the object a
+static tranching analysis would stop at. Sections \ref{sec:frontier} to \ref{sec:cascade} are
+about the other one.
+
+The correction matters at the boundary. At $A=D$ --- the point a naive account would call
+break-even --- the lender has already lost $D(1-1/\LIF)$, which is $4.20\%$ of the debt at
+$\lambda=0.86$ and $11.25\%$ at $\lambda=0.625$.
+
+\begin{definition}[Buffer]
+\[
+  B \;=\; \ell_{\mathrm{sen}}-\ell_{\mathrm{liq}} \;=\; \ltv_0\left(\frac{1}{\lambda}-\LIF\right).
+\]
+\end{definition}
+
+$B$ is the interval of collateral price over which liquidation is both permitted and sufficient:
+the room the mechanism has to work in, measured from the entry price.
+
+\begin{proposition}[The buffer is never empty]\label{prop:bpos}
+$B>0$ for every $\lambda\in(0,1)$, every $\ltv_0>0$, every cursor $c<1$ and every cap $M$.
+\end{proposition}
+
+\begin{proof}
+$B>0$ iff $\lambda\,\LIF<1$. Since $\LIF \leq 1/(1-c(1-\lambda))$ by definition of the minimum,
+$\lambda\,\LIF \leq \lambda/\bigl((1-c)+c\lambda\bigr)$, and
+$\lambda < (1-c)+c\lambda \iff (1-c)\lambda < 1-c \iff \lambda<1$. No case split on $M$ is needed.
+\end{proof}
+
+The positivity is a design constraint rather than a discovery: the incentive formula is built to
+satisfy $\LIF < 1/\lambda$, which is what makes the structure a tranche at all rather than one in
+which the enforcer is paid out of the lender's principal from the first block.
+
+The buffer can be small. At $L=3$ and $\lambda=0.86$, liquidation opens at $-22.5\%$, senior loss
+begins at $-30.4\%$, and $B=7.9$ points. The naive account --- which asks only when the equity is
+extinguished, at a fall of $1/L=33.3\%$ --- is precisely the case $\LIF=1$. It places the
+liquidation threshold correctly, since $\ell_{\mathrm{liq}}$ does not involve $\LIF$ at all, and
+misses the senior threshold by
+\[
+  \tfrac{1}{L}-\ell_{\mathrm{sen}} \;=\; \ltv_0\,(\LIF-1),
+\]
+the enforcer's premium expressed as a fraction of the entry price --- $2.9$ points here. The
+buffer inherits exactly that error, since $B$ is the difference of the two thresholds: the naive
+counterpart of $B$ is $1/L-\ell_{\mathrm{liq}} = 10.8$ points against a true $7.9$. Note that
+$1/L$ and $B$ are not themselves comparable quantities; the first is a cushion measured from
+entry, the second an interval between two thresholds.
+
+Two measures of the same room will both be needed below, and confusing them is the easiest error
+to make here. $B$ is measured from the \emph{entry} price and therefore depends on $L$. Measured
+from the price at which liquidation opens --- which is where the mechanism actually operates ---
+the distance to the senior threshold is
+\begin{equation}\label{eq:beta}
+  \beta \;=\; 1-\lambda\,\LIF,
+\end{equation}
+which does not depend on $L$ at all. At $\lambda=0.86$, $\beta = 10.23\%$ while $B = 7.93\%$.
+Every dynamic statement in this paper is about $\beta$.
+
+\begin{proposition}[Partial liquidation below $\ell_{\mathrm{sen}}$]\label{prop:sign}
+Let $r \in \bigl(0,\min(D,\,A/\LIF)\bigr)$. After a repayment $r$ the ratio becomes
+$\ltv' = (D-r)/(A-r\,\LIF)$, and
+\[
+  \ltv' > \ltv \iff A < D\,\LIF .
+\]
+Moreover the eventual shortfall $D-A/\LIF$ is invariant under any such repayment.
+\end{proposition}
+
+\begin{proof}
+$\ltv'>\ltv$ iff $(D-r)A > D(A-r\LIF)$, i.e. $-rA > -Dr\,\LIF$; dividing by $r>0$ and reversing
+gives $A < D\,\LIF$. For the second claim,
+$(D-r)-(A-r\LIF)/\LIF = D - r - A/\LIF + r = D-A/\LIF$.
+\end{proof}
+
+This is the structural content of Proposition~\ref{prop:sen}. Above the senior threshold each
+partial liquidation lowers the loan-to-value ratio and the position converges to health; below
+it, each partial liquidation \emph{raises} the ratio and the position never returns to health.
+The threshold marks where the mechanism stops being able to repair a position, and it does so
+before any bad debt is recorded.
+
+It does not, however, mark a point at which liquidating destroys value, and the temptation to
+read it that way should be resisted. The invariance in Proposition~\ref{prop:sign} says the
+shortfall is fixed the moment the price crosses $\ell_{\mathrm{sen}}$: partial liquidation below
+the threshold neither deepens nor cures it. If anything the incentive runs the other way. Every
+unit repaid below the threshold converts an exposure that can still worsen into a loss that
+cannot, so from the lender's side faster clearing is strictly better there --- the opposite of
+what the rising ratio suggests. What changes at $\ell_{\mathrm{sen}}$ is only that the position
+can now be worked to exhaustion rather than back to health.
+
+\section{The liquidator's frontier}\label{sec:frontier}
+
+Propositions \ref{prop:liq}--\ref{prop:sign} describe when liquidation is \emph{permitted}. A
+lending market is cleared not by permission but by an agent who acts when acting pays.
+
+Consider a liquidator financed by a flash loan, which is the standard construction and imposes no
+capital requirement. The agent borrows $r$ of the loan asset, repays $r$ of debt, receives
+collateral worth $r\LIF$ \emph{at the oracle price}, sells it into the market at proportional
+slippage $\sigma$, returns the flash loan with fee $\phi$, and pays gas $g$:
+\[
+  \pi \;=\; r\,\LIF\,(1-\sigma) \;-\; r(1+\phi) \;-\; g .
+\]
+
+\begin{proposition}[Incentive inequality]\label{prop:frontier}
+Liquidation of size $r$ is performed only if
+\begin{equation}\label{eq:frontier}
+  \LIF\,(1-\sigma) \;\geq\; 1+\phi+\frac{g}{r}.
+\end{equation}
+\end{proposition}
+
+On Morpho Blue $\phi=0$: the flash-loan primitive transfers the assets out and pulls the same
+amount back, charging nothing. We take $\phi=0$ below.
+
+\begin{corollary}[Slippage tolerance]\label{cor:sigma}
+In the limit of large $r$, the market clears only where
+\[
+  \sigma \;\leq\; \sigma^{*} \;=\; 1-\frac{1}{\LIF}.
+\]
+\end{corollary}
+
+\begin{corollary}[Minimum viable size]\label{cor:rmin}
+At gas $g$ and slippage $\sigma<\sigma^{*}$, no liquidation occurs below
+\[
+  r_{\min} \;=\; \frac{g}{\LIF\,(1-\sigma)-1},
+  \qquad\text{so at }\sigma=0,\quad r_{\min}=\frac{g}{\LIF\,\sigma^{*}} .
+\]
+For $\sigma\geq\sigma^{*}$ no size is viable.
+\end{corollary}
+
+The second corollary is often quoted as a gas bound. It is not: $r_{\min}$ is proportional to gas
+but inversely proportional to $\sigma^{*}$, and Table~1 shows it moving twentyfold across the
+range of caps at fixed $g$. The cap sets the scale of the dust; gas only sets the unit.
+
+\subsection{What the budget costs}
+
+$\sigma^{*}$ is not a free parameter of the design. It is carved out of the same quantity that
+supplies the buffer.
+
+\begin{proposition}[Partition of the cap headroom]\label{prop:split}
+Away from the cap $M$,
+\[
+  \sigma^{*} \;=\; c\,(1-\lambda), \qquad \beta \;=\; (1-c)(1-\lambda)\,\LIF,
+\]
+so that the headroom $1-\lambda$ splits as
+\[
+  1-\lambda \;=\; \underbrace{c\,(1-\lambda)}_{\text{enforcer's budget}} \;+\;
+                  \underbrace{(1-c)(1-\lambda)}_{\text{room retained}},
+  \qquad\text{and}\qquad
+  \frac{\beta}{\sigma^{*}} \;=\; \frac{(1-c)\,\LIF}{c}.
+\]
+\end{proposition}
+
+\begin{proof}
+$\sigma^{*} = 1-1/\LIF = 1-\bigl(1-c(1-\lambda)\bigr) = c(1-\lambda)$. For $\beta$, use
+\eqref{eq:beta}: $1-\lambda\LIF = \bigl(1-c(1-\lambda)-\lambda\bigr)\LIF = (1-c)(1-\lambda)\LIF$.
+The ratio follows.
+\end{proof}
+
+This is the paper's central identity and it is worth stating without symbols. The cursor $c$ is a
+\emph{split}. Every point of loan-to-value headroom the protocol declines to lend against is
+divided between the premium that pays the enforcing agent and the room that agent is given to
+work in, in the proportion $c$ to $1-c$. The retained room is a distance in loan-to-value;
+converting it to a price distance multiplies by $\LIF$, which is why the ratio the liquidator
+actually experiences, $\beta/\sigma^{*}$, is $(1-c)\LIF/c$ --- at production constants, roughly one
+part budget to $2.4$ parts room. The two cannot be set independently: a protocol wishing to
+pay liquidators more for a given cap can do so only by shortening the distance over which they
+have to succeed. And since $\sigma^{*}=c(1-\lambda)$ is linear, the exchange rate is a constant:
+\emph{every point of loan-to-value cap costs the liquidator thirty basis points of slippage
+budget}, whatever the collateral and whatever the venue.
+
+\begin{remark}[The budget is also the loss]
+$\sigma^{*}$ is likewise the lender's proportional loss at $A=D$, since
+$(D-A/\LIF)/D = 1-1/\LIF$ there. This is an identity rather than a theorem, but it is the reason
+the two halves of this paper describe one object: the premium that pays the enforcer, the market
+depth the collateral must have, and --- at the point $A=D$ --- the loss the lender absorbs when
+that depth is absent are the same number.
+\end{remark}
+
+\begin{table}[h]\centering
+\begin{tabular}{rrrrr}
+\toprule
+$\lambda$ & $\LIF$ & $\sigma^{*}$ & $\beta$ & $r_{\min}$ at $g=50$ \\
+\midrule
+0.980 & 1.0060 & 0.60\% & 1.41\% & 8{,}283 \\
+0.965 & 1.0106 & 1.05\% & 2.48\% & 4{,}712 \\
+0.945 & 1.0168 & 1.65\% & 3.91\% & 2{,}980 \\
+0.915 & 1.0262 & 2.55\% & 6.11\% & 1{,}911 \\
+0.860 & 1.0438 & 4.20\% & 10.23\% & 1{,}140 \\
+0.770 & 1.0741 & 6.90\% & 17.29\% & 675 \\
+0.625 & 1.1268 & 11.25\% & 29.58\% & 394 \\
+\bottomrule
+\end{tabular}
+\caption{The frontier at production parameters. In loan-to-value units the split is the constant
+$(1-c)/c = 2.33$; as a ratio of price distances $\beta/\sigma^{*}=(1-c)\LIF/c$ runs from $2.35$ to
+$2.63$ across the range. $r_{\min}$ is in loan-asset units and
+evaluated at $\sigma=0$; any positive slippage raises it.}
+\end{table}
+
+\begin{remark}[What $\sigma$ measures]
+The collateral is transferred at the \emph{oracle} price and realised at the \emph{market} price,
+so $\sigma$ is the oracle-to-execution gap and not merely order-book depth. A stale oracle
+marking the collateral above the bid consumes the same budget as thin liquidity. An oracle that
+reverts sets $\sigma=\infty$, since the trade cannot be initiated at all: the solvency predicate
+\eqref{eq:healthy} cannot be evaluated, and the enforcement transaction fails before it reaches
+the market. Withdrawal of collateral requires the same evaluation and freezes with it; lending is
+not symmetrically frozen, as \S6 records.
+\end{remark}
+
+\section{Clearing}
+
+Corollary~\ref{cor:sigma} bounds a rate. A lending market is exposed to a quantity. This section
+turns one into the other.
+
+\subsection{Slippage is observable, and part of its path is deterministic}
+
+Fix the argument of $\sigma$ once, since it is easy to lose. Write $\sigma(v)$ for the
+proportional slippage incurred selling collateral of loan-asset value $v$ into the venue, with
+$\sigma$ increasing and $\sigma(0^{+})=0$. A liquidation repaying $r$ sells $r\,\LIF$, so the
+frontier \eqref{eq:frontier} reads $\LIF\bigl(1-\sigma(r\LIF)\bigr)\geq 1+g/r$ throughout.
+
+It is tempting to treat $\sigma$ as a random variable to be estimated. On an on-chain venue it is
+not: the state is readable at every block, so $\sigma$ is a deterministic function of public
+state at the moment of evaluation. Two qualifications are owed immediately. Liquidators
+frequently exit through venues that are not on-chain, for which this is false; and the state at
+the moment the frontier binds is not the state now, since liquidation follows an adverse move.
+
+Part of that second gap is nonetheless deterministic. The debt is denominated in the loan asset
+and does not fall with the collateral, so extinguishing it after a fall $\ell$ requires selling
+$1/(1-\ell)$ times as many units. On a venue whose depth in units is unchanged this alone takes a
+position from $2\%$ slippage to $3.3\%$ after a $40\%$ fall. The effect is real but its size is
+model-dependent: on a constant-product venue the reserve of collateral grows as the price falls,
+impact scales as $1/\sqrt{1-\ell}$ rather than $1/(1-\ell)$, and the same move gives $2.6\%$. The
+honest statement is that the requirement grows with the move under any depth profile, and that
+the growth rate has to be read off the venue rather than assumed.
+
+\begin{remark}[The frontier gives a floor, computable each block]
+A curator can evaluate \eqref{eq:frontier} at each block against a grid of hypothetical $\ell$
+and obtain a threshold: the largest move this market absorbs while remaining enforceable. It
+should be read as a best case, not a stress test. Current state plus the quantity effect is a
+\emph{floor} on slippage --- it assumes the venue does not withdraw quotes --- and therefore an
+\emph{upper bound} on the tolerable move. In stress, quote withdrawal routinely dominates the
+quantity effect. The construction's value is that it is exact and requires no distributional
+assumption; its limit is that the true threshold is always below it.
+\end{remark}
+
+\subsection{How many slices a market can carry}
+
+\begin{definition}[Admissible slice]
+The largest repayment a single profitable liquidation can carry, ignoring gas, is
+\[
+  q_{\max} \;=\; \sup\{\,q>0 \;:\; \sigma(q\,\LIF)\leq\sigma^{*}\,\},
+\]
+which is positive since $\sigma(0^{+})=0<\sigma^{*}$, and finite whenever $\sigma$ is unbounded.
+\end{definition}
+
+A position of size $Q>q_{\max}$ cannot be cleared in one transaction at a profit. It must be sold
+in $N=\lceil Q/q_{\max}\rceil$ slices, separated by whatever interval $\Delta$ the venue needs for
+arbitrage to restore the price. Write $T=N\Delta$ for the clearing time. Let $\rho\in[0,1]$ denote
+the fraction of each slice's impact which is permanent, that is, not recovered between slices.
+
+The liquidator therefore pushes the price toward the very threshold it is racing against. Two
+opposing effects have to be tracked, and the first version of this argument tracked only one. Each
+slice moves the price down by $\rho\sigma^{*}$, which consumes room. But each slice also repays
+debt, and since seizure removes collateral value $\LIF$ times faster than it removes debt, the
+\emph{proportional} distance from the current price to the senior threshold widens as the position
+is worked. The bound below is stated conservatively, discarding the second effect.
+
+Because impacts compound rather than add, the natural unit here is the log-decline. Write
+\begin{equation}\label{eq:logunits}
+  \kappa \;=\; -\ln\bigl(1-\rho\sigma^{*}\bigr), \qquad b \;=\; -\ln\bigl(\lambda\LIF\bigr),
+\end{equation}
+for the permanent log-impact of one slice and the log-distance from the liquidation price to the
+senior threshold. To first order $\kappa \simeq \rho\sigma^{*}$ and $b \simeq \beta$; both are used
+in this form for the rest of the paper.
+
+\begin{proposition}[Slice-count bound]\label{prop:self}
+Suppose clearing begins at the liquidation threshold, the price is unchanged except by the
+liquidator's own permanent impact, and the oracle tracks that impact between slices. Then the
+senior tranche survives the clearing of a position spanning $N$ slices whenever
+\[
+  N \;<\; \frac{b}{\kappa}, \qquad\text{to first order}\qquad
+  N \;\leq\; N^{*} \;=\; \frac{\beta}{\rho\,\sigma^{*}} \;=\; \frac{(1-c)\,\LIF}{c\,\rho}.
+\]
+The bound is independent of the borrower's leverage and, up to $\LIF$, of the cap.
+\end{proposition}
+
+\begin{proof}
+Let $x_n = A_n/\LIF$ be the repayment capacity of the collateral after $n$ slices and $D_n$ the
+debt, so senior loss is the event $x_n < D_n$. A slice repaying $q$ seizes collateral worth
+$q\LIF$ and then moves the price by a permanent factor $(1-u)$, $u=\rho\sigma^{*}$, so
+$x_{n+1} = (x_n-q)(1-u)$ and $D_{n+1}=D_n-q$. Unrolling with equal slices $q=D_0/N$,
+\[
+  x_N \;=\; x_0(1-u)^N - q\sum_{k=1}^{N}(1-u)^k, \qquad D_N \;=\; D_0-Nq,
+\]
+so the slack $S_N = x_N-D_N$ satisfies
+\[
+  S_N \;=\; x_0(1-u)^N - D_0 + q\Bigl[N-\sum_{k=1}^{N}(1-u)^k\Bigr] \;\geq\; x_0(1-u)^N - D_0,
+\]
+the bracket being non-negative since $(1-u)^k\leq1$. Enforcement begins at $A_0=D_0/\lambda$, so
+$x_0 = D_0/(\lambda\LIF)$ and $S_N \geq x_0\bigl((1-u)^N-\lambda\LIF\bigr)$, which is positive
+exactly when $N\ln(1-u) > \ln(\lambda\LIF)$, that is $N<b/\kappa$. Replacing $1-(1-u)^N$ by $Nu$
+gives the first-order form, and Proposition~\ref{prop:split} the closed form.
+\end{proof}
+
+The oracle hypothesis is not cosmetic and it cuts both ways. If the oracle tracks the impact, the
+damage appears where the proof puts it: as movement of $A_n$ toward the senior threshold. If the
+oracle lags, $A_n$ is marked too high, the position looks safer than it is, and the impact
+surfaces instead as slippage on the next slice --- shrinking $q_{\max}$, raising $N$, and
+tightening the same bound from the other side. A lagging oracle does not avoid the constraint; it
+relocates it from the numerator to the denominator and conceals it while it accumulates.
+
+At $\rho=0.3$ the bound is $b/\kappa=8.51$, or $N^{*}=8.12$ in first-order form: \emph{a position
+more than about eight admissible slices in size cannot be assumed to survive its own unwinding,
+even in a market that never moves.} The first-order constant is the partition ratio of
+Proposition~\ref{prop:split} divided by $\rho$, which is why it does not depend on how levered the
+borrower was --- a fact the entry-based buffer $B$ obscures.
+
+The bound is sufficient, and slack. Under the same hypotheses, restoring the deleveraging effect
+discarded in the proof --- the bracket dropped there --- and iterating to a full clear in equal
+slices gives the sharp threshold: $17$ slices at $\rho=0.3$, $26$ at $\rho=0.2$. The gap is slack
+in the bound, not uncertainty about the venue, and it decomposes cleanly: $8.12\to8.51$ is the
+compounding restored by the logarithm, $8.51\to17$ is the deleveraging. The threshold does,
+however, depend on how the position is worked, and in a direction worth stating. Under the proposition's own model --- impact
+$\rho\sigma^{*}$ per slice whatever the slice's size --- splitting a slice in two doubles the
+damage, and the sharp threshold falls from $17$ to $8$ at half-slices and $4$ at quarter-slices.
+The coarsest admissible schedule is therefore optimal, and $17$ is the best case over schedules
+rather than the only case. The conclusion survives a more realistic impact function so long as it
+is concave or linear in size: with impact proportional to size the threshold runs from $17$ at
+whole slices to $16.8$ in the continuous limit, so slicing moves it by about one per cent, and
+with square-root impact finer slicing is again worse.
+Only convex impact would let a liquidator do better by slicing, and that is not the usual shape.
+What matters is that these numbers are small, and that they are properties of the venue rather
+than of the loan.
+
+This is the point at which the second attachment can be named.
+
+\begin{definition}[Effective attachment point]\label{def:eff}
+Write $d_{\mathrm{liq}}=-\ln(1-\ell_{\mathrm{liq}})$ and $d_{\mathrm{sen}}=-\ln(1-\ell_{\mathrm{sen}})$,
+so that $d_{\mathrm{sen}}-d_{\mathrm{liq}}=b$ exactly. The \emph{effective attachment point} of a
+position of size $Q$, with $N=\lceil Q/q_{\max}\rceil$, is
+\[
+  d_{\mathrm{eff}}(Q) \;=\; \max\bigl(d_{\mathrm{liq}},\; d_{\mathrm{sen}}-N\kappa\bigr),
+  \qquad
+  \ell_{\mathrm{eff}}(Q) \;=\; 1-e^{-d_{\mathrm{eff}}(Q)} ,
+\]
+a lower bound on the smallest exogenous fall from which clearing can no longer complete before the
+senior claim is impaired.
+\end{definition}
+
+The definition is a rearrangement of the slack inequality in the proof above, not a new object:
+the position must survive $N$ slices of permanent impact, so the fall it can absorb beforehand is
+the contractual one less the damage the clearing will do. In log units that subtraction is exact,
+and the guard against large $N$ is automatic --- $d_{\mathrm{sen}}-N\kappa$ simply falls through
+$d_{\mathrm{liq}}$ and is clipped there.
+
+Two properties follow, and neither was available for $\ell_{\mathrm{sen}}$. First,
+$\ell_{\mathrm{liq}} \leq \ell_{\mathrm{eff}} < \ell_{\mathrm{sen}}$, the floor attained exactly
+at $N=b/\kappa$ --- the two thresholds of \S2 are the two ends of this one quantity, and $b/\kappa$
+is where the room has been entirely consumed by the act of clearing. The upper end is approached
+but not attained, since even a single slice does $\kappa$ of damage: $\ell_{\mathrm{eff}}(q_{\max})
+= 29.8\%$ against $\ell_{\mathrm{sen}}=30.4\%$ at the parameters below. That last $0.6$ points is
+slack of the bound rather than a property of the position; the sharp recursion, which credits the
+seizure before the impact, recovers it. Second, $\ell_{\mathrm{eff}}$ depends on $Q$, on $q_{\max}$
+and on $\rho$, none of which is a parameter of the market and all of which move without any
+transaction on the protocol; $\Delta$ enters too, once the price is allowed to move on its own,
+through Proposition~\ref{prop:passage}. At $\lambda=0.86$, $L=3$ and $\rho=0.2$, a position of five
+admissible slices has $\ell_{\mathrm{eff}}=27.4\%$ against a contractual $30.4\%$; at ten slices,
+$24.3\%$.
+
+This is the sense in which the attachment point of these structures is endogenous. It is not a
+term of the contract but an outcome of the venue, recomputed every block, and it is the one that
+binds. Substituting the sharp recursion for the slack bound gives
+\[
+  \ell_{\mathrm{eff}}^{\,\mathrm{sharp}}(N) \;=\;
+  1-(1-\ell_{\mathrm{sen}})\,(1-u)\,\frac{(1-u)^{-N}-1}{Nu}, \qquad u=\rho\sigma^{*},
+\]
+which restores $\ell_{\mathrm{eff}}(q_{\max})=\ell_{\mathrm{sen}}$, halves the initial slope in $N$,
+and moves the floor from $b/\kappa$ to $17$. What the two forms share is only the concave descent
+between the two thresholds, once $N$ is measured as a fraction of its own threshold.
+
+\subsection{Impact, volatility and carry in one race}
+
+Proposition~\ref{prop:self} assumes the price moves only through execution. The opposite
+idealisation --- that it moves only through news --- is equally available and equally partial.
+Both are limits of one problem.
+
+Write $Z_t = \ln\bigl(A_t/(D_t\LIF)\bigr)$. Senior loss is the event $Z_t \leq 0$, and
+$Z_0 = \ln\bigl(1/(\lambda\LIF)\bigr) =: b$ at the moment enforcement begins. Three things move
+$Z$: the liquidator's permanent impact, at rate $m=\kappa/\Delta$ with $\kappa$ from
+\eqref{eq:logunits} --- $Z$ is a logarithm and one slice multiplies the price by $1-\rho\sigma^{*}$,
+so $\kappa$ and not $\rho\sigma^{*}$ is the per-slice drop; the carry, at rate
+$r_b-y$ where $r_b$ is the borrow rate and $y$ the collateral's yield; and exogenous price
+innovation, with volatility $\sigma_p$. Repayment is omitted from $Z$, exactly as it is from the bound of
+Proposition~\ref{prop:self}: by Proposition~\ref{prop:sign} each slice raises $Z$, so the
+probability below is an upper bound, and its $\sigma_p\to0$ limit inherits the slack of $N^{*}$
+rather than the sharp threshold of $17$.
+
+\begin{proposition}[Probability of senior loss]\label{prop:passage}
+Suppose $Z_t = b-\mu t+\sigma_p W_t$ with $\mu = m+(r_b-y)$, and let clearing take $T=N\Delta$.
+Then
+\[
+  \mathbb{P}(\text{senior loss before } T)
+  \;=\; \Phi\!\left(\frac{\mu T-b}{\sigma_p\sqrt{T}}\right)
+      \;+\; e^{2\mu b/\sigma_p^{2}}\,
+        \Phi\!\left(\frac{-\mu T-b}{\sigma_p\sqrt{T}}\right).
+\]
+\end{proposition}
+
+\begin{proof}
+Standard first passage for arithmetic Brownian motion: for $X_t=-\mu t+\sigma_p W_t$ and $a<0$,
+$\mathbb{P}(\min_{t\leq T}X_t\leq a) = \Phi\bigl((a+\mu T)/(\sigma_p\sqrt T)\bigr) +
+e^{-2\mu a/\sigma_p^{2}}\Phi\bigl((a-\mu T)/(\sigma_p\sqrt T)\bigr)$. Set $a=-b$.
+\end{proof}
+
+\begin{corollary}\label{cor:limits}
+As $\sigma_p\to0$ the probability tends to $\mathbf{1}\{\mu T> b\}$, the value at $\mu T=b$ being
+$\tfrac12$; ignoring carry, $\mu T =
+N\kappa$ and the survival condition is $N<b/\kappa=8.51$, which is exactly
+Proposition~\ref{prop:self}. As $\mu\to0$ it tends to
+$2\Phi\bigl(-b/(\sigma_p\sqrt T)\bigr)$, the driftless reflection-principle bound.
+\end{corollary}
+
+Call $(b-\mu T)/(\sigma_p\sqrt T)$ the \emph{clearing margin}: room remaining after the
+liquidator's own damage, divided by the distance the price is expected to wander while the
+position is worked. Its content is that $\lambda$, and therefore $\beta$, is uninformative alone.
+Two markets at the same cap, and therefore with identical buffers, can sit at opposite ends of the
+outcome space.
+
+\begin{table}[h]\centering
+\begin{tabular}{lrr}
+\toprule
+& \textbf{deep, moderate vol.} & \textbf{thin, high vol.} \\
+\midrule
+$q_{\max}$ & 2{,}000{,}000 & 1{,}000{,}000 \\
+position $Q$ & 10{,}000{,}000 & 10{,}000{,}000 \\
+slices $N$ & 5 & 10 \\
+$\Delta$ & 5 min & 15 min \\
+$T$ & 25 min & 2.5 h \\
+$\sigma_p$ & 100\%/yr & 300\%/yr \\
+$\rho$ & 0.2 & 0.2 \\
+\midrule
+$b$ & 10.79\% & 10.79\% \\
+impact $\mu T$ (carry omitted) & 4.22\% & 8.44\% \\
+noise $\sigma_p\sqrt T$ & 0.69\% & 5.07\% \\
+clearing margin & \textbf{9.53} & \textbf{0.46} \\
+$\mathbb{P}(\text{senior loss})$ & ${\approx}10^{-21}$ & $41\%$ \\
+\bottomrule
+\end{tabular}
+\caption{Identical cap, identical room $b$, opposite outcomes. Both positions satisfy
+Proposition~\ref{prop:self} at $\rho=0.2$, so neither fails on impact alone. The difference is
+carried entirely by $q_{\max}$, $\Delta$ and $\sigma_p$, none of which appears among the market's
+parameters. The clearing margin, not the probability, is the result: the left-hand entry is a
+Gaussian tail at nine and a half standard deviations and should not be read as a number. Under a
+Student $t$ with three degrees of freedom the two margins give terminal tails of
+${\approx}10^{-3}$ and $33\%$, against Gaussian terminal tails of $7\times10^{-22}$ and $32\%$ ---
+a factor of a few hundred rather than of $10^{21}$, and the ordering unchanged. The $41\%$ above
+includes the reflection term; the terminal tails do not.}
+\end{table}
+
+\begin{remark}[Where carry actually bites]
+In Proposition~\ref{prop:passage} carry enters $\mu$ additively with impact, which places the
+interest-rate model and the venue's depth in the same units --- but over a clearing window it is
+negligible: at a $300\%$ spread, $2.5$ hours of carry is $9$ basis points against $840$ of impact.
+Carry is not what loses the race. It is what starts it: at a flat price and $r_b>y$, the position
+reaches the liquidation threshold at $t^{*}=\ln(\lambda/\ltv_0)/(r_b-y)$, and $r_b$ is set by an
+adaptive model that raises it precisely when utilisation rises --- that is, when borrowers cannot
+repay and lenders cannot withdraw. At $L=3$ a position with $t^{*}$ of over a decade at a $2\%$
+spread has a $t^{*}$ of about a month at a $300\%$ one, with nothing about the position changed.
+The interest-rate model does not decide whether liquidation succeeds; it decides how many
+positions are queued at the frontier when it is tested.
+\end{remark}
+
+\section{Cascades}\label{sec:cascade}
+
+Proposition~\ref{prop:self} treats one position pushing the price against itself. In a market with
+many borrowers the same impact makes \emph{other} positions liquidatable, and the question is how
+far the resulting sequence runs.
+
+Declines must now be added across positions entered at different prices, so we work in logarithms
+throughout this section, where impact compounds additively and no first-order approximation is
+needed. Write $d=-\ln(1-\delta)$ for a log-decline measured from the pre-shock price, and recall
+$\kappa$ and $b$ from \eqref{eq:logunits}. All positions are re-marked at the pre-shock price, so
+$d_{\mathrm{liq}}(i)$ is position $i$'s liquidation threshold expressed in that common frame.
+
+Let $d_0>0$ be an exogenous log-decline and let $Q(d)$ be the borrow rendered liquidatable once
+the price has fallen by $d$. $Q$ is a primitive of the market, read off the distribution of
+liquidation prices across open positions; it is a non-decreasing step function, with a jump
+wherever a mass of positions shares a liquidation price. Clearing that volume obeys the mechanics
+of \S4.2 --- $Q(d)/q_{\max}$ slices, each leaving $\kappa$ of permanent log-impact --- so
+\begin{equation}\label{eq:cascade}
+  d_{n+1} \;=\; F(d_n), \qquad
+  F(d) \;=\; d_0+\kappa\,\frac{Q(d)}{q_{\max}},
+  \qquad d_1 = F(d_0).
+\end{equation}
+
+\begin{proposition}[Where a cascade stops]\label{prop:cascade}
+A least $d\geq d_0$ satisfying
+\begin{equation}\label{eq:secant}
+  Q(d) \;\leq\; \frac{q_{\max}}{\kappa}\,\bigl(d-d_0\bigr)
+\end{equation}
+exists whenever total borrow is finite, with no further hypothesis on $Q$. If in addition the
+market holds finitely many positions, say $m$, the iterates \eqref{eq:cascade} reach it in at most
+$m+1$ rounds, and the set of positions liquidated grows strictly at every round but the last.
+\end{proposition}
+
+\begin{proof}
+$Q$ is non-decreasing, so $F$ is non-decreasing and maps the interval
+$I=[d_0,\,d_0+\kappa Q_{\mathrm{tot}}/q_{\max}]$ into itself, $Q_{\mathrm{tot}}$ being total borrow.
+$I$ is a complete lattice and \eqref{eq:secant} is $F(d)\leq d$ rearranged, so by Tarski's fixed
+point theorem the set of fixed points of $F$ in $I$ is a non-empty complete lattice and has a least
+element, which is the least $d$ satisfying \eqref{eq:secant}. Neither continuity nor finiteness is
+used.
+
+For the second claim, let $S_k=\{i : d_{\mathrm{liq}}(i)\leq d_k\}$ be the set liquidated after $k$
+rounds. The iterates are non-decreasing --- $d_1\geq d_0$ since $Q\geq0$, and monotonicity of $F$
+propagates it --- so the $S_k$ are nested increasing. If $S_{k+1}=S_k$ then $Q(d_{k+1})=Q(d_k)$,
+since $Q$ depends on $d$ only through that set, hence $d_{k+2}=d_{k+1}$ and the iteration has
+stopped. So every round but the last adds at least one position, and there are $m$ to add.
+\end{proof}
+
+The two halves of the proposition need different hypotheses, and separating them is the point.
+Existence is a lattice fact and costs nothing. What finiteness buys is that the \emph{iteration}
+reaches the fixed point, and reaches it fast --- a market of a thousand positions settles in at
+most a thousand and one rounds, and in simulation far fewer. Without finiteness the limit of the
+iterates need not satisfy
+\eqref{eq:secant}: a right-continuous $Q$ with infinitely many jumps accumulating at some $d^{*}$
+lets the sequence converge to $d^{*}$ while $F(d^{*})>d^{*}$, so the least $d$ satisfying
+\eqref{eq:secant} lies strictly above the limit. Real markets have finitely many positions and the
+question does not arise; a continuum model of the same market would need $Q$ left-continuous
+instead.
+
+\begin{remark}[Relation to network clearing]\label{rem:en}
+Proposition~\ref{prop:cascade} is, in method, the clearing problem of Eisenberg and
+Noe~\cite{eisenberg2001}. Their clearing vector solves $p=\bar L \wedge (e+\Pi^{\!\top}p)$, with
+$\bar L$ the vector of total liabilities, $e$ the endowments and $\Pi$ the relative liability
+matrix. The map is monotone on a lattice, so its solutions form a complete lattice and existence
+is a lattice fact --- Tarski~\cite{tarski1955}, not Banach --- and their fictitious default
+algorithm terminates in at most one round per node, because each round either adds a defaulter or
+stops. Both arguments are the ones used above, and the second is why
+the bound is $m+1$ rather than merely ``eventually''.
+
+The economics is not theirs, and the difference matters. In~\cite{eisenberg2001} node $i$ reaches
+node $j$ through a \emph{contractual liability}: $\Pi$ is a balance sheet. Borrowers in an isolated
+market have no claim on one another whatsoever; position $i$ reaches position $j$ only by moving a
+price, which is fire-sale contagion, and the closer ancestor is Cifuentes, Ferrucci and
+Shin~\cite{cifuentes2005}, who layer a price that falls with aggregate sales onto the Eisenberg--Noe
+problem and obtain a joint fixed point in payments and price. The reduced-form version used by
+Greenwood, Landier and Thesmar~\cite{greenwood2015} and the estimates in Duarte and
+Eisenbach~\cite{duarte2021} are the empirical descendants.
+
+Two further departures are worth naming. Their state is a vector on a general liability graph;
+ours collapses to a scalar, because in an isolated market every position reaches every other
+through exactly one price --- the network is a star through the venue, not a graph, and that is a
+property of the market design rather than a modelling convenience. And their algorithm iterates
+\emph{downward} from full payment and selects the greatest clearing vector, where
+\eqref{eq:cascade} iterates \emph{upward} from the shock and selects the least fixed point above
+$d_0$. The direction is not a choice: a cascade genuinely begins at the shock and works up, so the
+least fixed point is the one the market visits.
+\end{remark}
+
+Two things follow from the form of \eqref{eq:secant}. It is a secant condition, not a derivative
+one, so it needs no smoothness and is evaluated exactly at the cliffs of $Q$, which are the only
+places the question is interesting; a contraction argument would be both unavailable and
+unnecessary. And it is a statement about \emph{where} the cascade stops, not whether. In a market
+with finite borrow it always stops. The useful question is never termination --- it is whether
+$\bar d$ arrives before the senior thresholds of the positions in its path.
+
+Read \eqref{eq:secant} against Proposition~\ref{prop:self} and the two agree. A single position
+starting at its own liquidation threshold makes $\bar d-d_0=N\kappa$, and its senior claim is
+impaired only if that exceeds $b$ --- that is, only if $N>b/\kappa=8.51$, which is
+Proposition~\ref{prop:self}'s $N^{*}=8.12$ up to the compounding the logarithm now carries
+exactly. The market case is the same inequality with $Q$ read off many borrowers instead of one.
+The quantity $q_{\max}/\kappa$ is the venue's \emph{marginal depth} in this model: the borrow that
+may be made liquidatable per unit of log-decline without the decline feeding itself. The condition
+reads
+
+\begin{center}
+\emph{the borrow made liquidatable over an interval of decline must not exceed the venue's
+marginal depth times the width of that interval.}
+\end{center}
+
+Both sides are observable. The left is a property of how borrowers are distributed; the right is
+a property of the market they will be sold into.
+
+Two consequences deserve statement. First, the condition is \emph{local}: it can hold on average
+across the price range and fail on an interval. A market in which many positions share a
+liquidation price has a jump in $Q(\cdot)$ there, and a cascade that reaches that jump is carried
+past it regardless of how comfortably \eqref{eq:secant} holds elsewhere. It is only reached if no
+earlier $d$ satisfies \eqref{eq:secant} first, which is precisely why the criterion must be
+evaluated as a secant from $d_0$ rather than pointwise. Concentration of \emph{liquidation
+prices}, not merely of size, is the hazard --- and a front end offering one default leverage
+produces it whenever entries also cluster in time, since a common leverage and a common entry
+price give a common liquidation price.
+
+Second, the condition couples two things that no single agent controls. A curator sets caps and
+therefore influences $Q$; nobody sets $\sigma$. A market can pass the test on the day it is
+configured and fail it after liquidity migrates, with no transaction on the protocol having
+occurred.
+
+Finally, \eqref{eq:secant} delivers the effective attachment point at market scale. Borrower $i$
+can suffer senior loss only if the terminal $\bar d$ exceeds $d_{\mathrm{liq}}(i)+b$, which in
+logarithms is exactly $d_{\mathrm{sen}}(i)$, with no first-order term discarded. The condition is
+necessary and not sufficient: a position cleared early in the cascade is sold before the price
+reaches its own senior level. Since $\bar d$ is non-decreasing in $d_0$, the market-scale effective
+attachment of position $i$ is well defined as the smallest shock that carries the cascade past it,
+$d_{\mathrm{eff}}(i)=\inf\{d_0 : \bar d(d_0) > d_{\mathrm{sen}}(i)\}$, with
+$\ell_{\mathrm{eff}}(i)=1-e^{-d_{\mathrm{eff}}(i)}$ in the units of \S2. When $Q$ has a single step
+of height $Q$ this is $d_{\mathrm{sen}}-\kappa Q/q_{\max}$, which is Definition~\ref{def:eff}
+exactly. The contractual attachment of
+Proposition~\ref{prop:sen} is a property of that position's parameters alone; the effective one is
+a property of every other borrower
+in the same market and of the venue they will all be sold into. Two positions on identical terms,
+in two markets with identical parameters, do not have the same attachment point --- the one whose
+neighbours' liquidation prices are more concentrated has the worse one, and nothing either
+borrower signed records the difference.
+
+\section{One inequality, three failures}
+
+The three ways a market of this type stops behaving as a tranche structure are not independent
+phenomena. They are \eqref{eq:frontier} failing --- on two terms, one of which fails in two
+qualitatively different ways.
+
+\begin{table}[h]\centering
+\begin{tabular}{@{}l l p{5.4cm}@{}}
+\toprule
+\textbf{term} & \textbf{failure} & \textbf{observed as} \\
+\midrule
+$\sigma$ undefined & no price exists & liquidation and collateral withdrawal both impossible;
+borrowing halted; only un-borrowed liquidity remains withdrawable \\
+$\sigma>\sigma^{*}$ & collateral unsellable & bad debt on gapping or illiquid assets \\
+$A/\LIF<r_{\min}$ & position too small & dust nobody clears; loss recognised late or never \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The first row is not a limiting case of the second. An oracle that reverts does not make the
+collateral expensive to sell; it makes the solvency predicate \eqref{eq:healthy} unevaluable, so
+the transaction fails before reaching any venue. Note also what it does \emph{not} freeze: lenders
+whose funds are not currently borrowed can still withdraw, and typically do, which raises
+utilisation on the remainder and --- by the interest-rate model --- the rate charged to borrowers
+who cannot withdraw collateral. The freeze is asymmetric.
+
+The third row is stated on collateral rather than on debt, since a liquidator can never repay more
+than $A/\LIF$; when even that maximum repayment is below $r_{\min}$ no profitable liquidation
+exists at any size, and ``never cleared'' follows without hedging. It deserves emphasis because it
+inverts a common intuition. Large positions are not the dangerous ones \emph{on this term}: they
+are the ones the gas condition is certain to clear --- though, by Proposition~\ref{prop:self},
+they may well fail the other. The two size conditions run in opposite directions, $r_{\min}$ from
+below and $N^{*}q_{\max}$ from above, so a market is enforceable only on the interval between
+them, and a sufficiently thin venue closes that interval entirely.
+
+A protocol that records loss only at exhaustive seizure --- as Morpho Blue does, writing bad debt
+when and only when the remaining collateral reaches zero --- therefore does not recognise the loss
+on precisely the positions that fail this term. The accounting is correct at every step and lags
+reality for as long as $A/\LIF<r_{\min}$ holds, which, absent intervention, is forever.
+
+\section{What the cap asserts}
+
+The loan-to-value cap is read as a leverage limit. Proposition~\ref{prop:split} gives it a second
+reading, and unlike the first it is quantitative.
+
+Since $\sigma^{*}=c(1-\lambda)$, raising the cap thins the residual tranche and narrows the
+enforcing agent's slippage budget in strict proportion, at thirty basis points of budget per point
+of cap. At $\lambda=0.98$ the market clears only if the collateral can be sold within sixty basis
+points of its oracle price; at $\lambda=0.86$ the budget is $4.2$ points. Neither number is a
+statement about volatility, and neither is enforced anywhere in the protocol --- $\sigma^{*}$
+appears in no contract, and nothing reverts when it is exceeded. What happens instead is that
+nobody sends the transaction.
+
+Setting a cap at $\lambda$ is therefore an assertion --- untested when made, and tested only in the
+worst state --- that the collateral will trade within $c(1-\lambda)$ of its oracle price at the
+size the market has accumulated. Read that way, a high cap is not a permission granted to
+borrowers but a claim made on their behalf about a venue, and a low cap is better read as a
+disclosure about the collateral than as a control on the borrower.
+
+\section{What this does not settle}
+
+The model treats $\sigma$ as a primitive and the collateral price as exogenous to execution beyond
+the impact terms. Four things are parametrised rather than derived, and each is a distinct piece of
+work.
+
+\emph{Impact persistence and recovery.} Propositions~\ref{prop:self} and \ref{prop:passage} carry
+$\rho$ and $\Delta$ as constants. Both are properties of the venue and of the information content
+of the flow --- a liquidation is uninformed selling, which should recover faster than informed ---
+and both are estimable per venue. Deriving them requires a market microstructure model this paper
+does not supply, and $N^{*}$ is only as good as $\rho$.
+
+\emph{The shape of $\sigma$ on a concentrated-liquidity venue.} The results use only that $\sigma$
+is increasing; the numerical illustrations would change with the depth profile. On a venue where
+liquidity is placed in ranges, $\sigma$ is not smooth and $q_{\max}$ can move discontinuously as
+the price crosses a range boundary --- which is precisely the region where the frontier is tested.
+This deserves separate treatment.
+
+\emph{Competition among liquidators.} $\pi>0$ is necessary for one agent to act; the realised
+clearing rate is set by the fastest, and priority auctions redistribute the premium without moving
+the frontier. Whether competition shortens $\Delta$ enough to matter is an empirical question about
+block construction rather than about lending.
+
+\emph{Endogeneity of $r_b$.} The rate responds to utilisation, and utilisation responds to whether
+the market clears. Proposition~\ref{prop:passage} takes $r_b$ as given; the fixed point of rate,
+utilisation and exit behaviour is the natural object and remains open.
+
+None of these weakens the frontier itself. \eqref{eq:frontier} is a necessary condition, so a market
+failing it fails to clear regardless of what the extensions add. The conditions derived from it run
+the other way: Propositions~\ref{prop:self} and \ref{prop:cascade} give sufficient conditions for
+survival and for the location of the stopping point, and a market satisfying them may still fail
+on a term this model holds fixed.
+
+\begin{thebibliography}{9}
+\bibitem{cifuentes2005} R.~Cifuentes, G.~Ferrucci and H.~S. Shin.
+  Liquidity risk and contagion. \emph{Journal of the European Economic Association}, 3(2--3):556--566, 2005.
+\bibitem{duarte2021} F.~Duarte and T.~M. Eisenbach.
+  Fire-sale spillovers and systemic risk. \emph{Journal of Finance}, 76(3):1251--1294, 2021.
+\bibitem{eisenberg2001} L.~Eisenberg and T.~H. Noe.
+  Systemic risk in financial systems. \emph{Management Science}, 47(2):236--249, 2001.
+\bibitem{greenwood2015} R.~Greenwood, A.~Landier and D.~Thesmar.
+  Vulnerable banks. \emph{Journal of Financial Economics}, 115(3):471--485, 2015.
+\bibitem{tarski1955} A.~Tarski.
+  A lattice-theoretical fixpoint theorem and its applications.
+  \emph{Pacific Journal of Mathematics}, 5(2):285--309, 1955.
+\end{thebibliography}
+
+\vspace{2em}
+\hrule height 0.4pt
+\vspace{0.8em}
+{\footnotesize\noindent $\sigma$-Labs \ $\cdot$ \ \href{https://www.sigmalabs.fi}{sigmalabs.fi}}
+
+\end{document}
